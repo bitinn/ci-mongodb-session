@@ -467,69 +467,119 @@ class MY_Session extends CI_Session {
 			return;
 		}
 
-		// Save the old session id so we know which record to
-		// update in the database if we need it
-		$old_sessid = $this->userdata['session_id'];
-		$new_sessid = '';
-		while (strlen($new_sessid) < 32)
-		{
-			$new_sessid .= mt_rand(0, mt_getrandmax());
-		}
+        // If not ajax request, call the default function to update session_id
+        if(!$this->CI->input->is_ajax_request()) {
 
-		// To make the session ID even more secure we'll combine it with the user's IP
-		$new_sessid .= $this->CI->input->ip_address();
-
-		// Turn it into a hash
-		$new_sessid = md5(uniqid($new_sessid, TRUE));
-
-		// Update the session data in the session data array
-		$this->userdata['session_id'] = $new_sessid;
-		$this->userdata['last_activity'] = $this->now;
-
-		// _set_cookie() will handle this for us if we aren't using database sessions
-		// by pushing all userdata to the cookie.
-		$cookie_data = NULL;
-
-		// Update the session ID and last_activity field in the DB if needed
-		if ($this->sess_use_database === TRUE)
-		{
-			// set cookie explicitly to only have our session data
-			$cookie_data = array();
-			foreach (array('session_id','ip_address','user_agent','last_activity') as $val)
+			// Save the old session id so we know which record to
+			// update in the database if we need it
+			$old_sessid = $this->userdata['session_id'];
+			$new_sessid = '';
+			while (strlen($new_sessid) < 32)
 			{
-				$cookie_data[$val] = $this->userdata[$val];
+				$new_sessid .= mt_rand(0, mt_getrandmax());
 			}
 
-			// Update session document
-			if ($this->_use_mongodb)
+			// To make the session ID even more secure we'll combine it with the user's IP
+			$new_sessid .= $this->CI->input->ip_address();
+
+			// Turn it into a hash
+			$new_sessid = md5(uniqid($new_sessid, TRUE));
+
+			// Update the session data in the session data array
+			$this->userdata['session_id'] = $new_sessid;
+			$this->userdata['last_activity'] = $this->now;
+
+			// _set_cookie() will handle this for us if we aren't using database sessions
+			// by pushing all userdata to the cookie.
+			$cookie_data = NULL;
+
+			// Update the session ID and last_activity field in the DB if needed
+			if ($this->sess_use_database === TRUE)
 			{
-				// Update session_id and last_activity
-				$this->CI->mongo_db
-					->where('session_id' => $old_sessid)
-					->set(array(
-						'session_id' => $new_sessid,
-						'last_activity' => $this->now)
-					)
-					->update($this->_config['sess_collection_name']);
+				// set cookie explicitly to only have our session data
+				$cookie_data = array();
+				foreach (array('session_id','ip_address','user_agent','last_activity') as $val)
+				{
+					$cookie_data[$val] = $this->userdata[$val];
+				}
+
+				// Update session document
+				if ($this->_use_mongodb)
+				{
+					// Update session_id and last_activity
+					$this->CI->mongo_db
+						->where('session_id' => $old_sessid)
+						->set(array(
+							'session_id' => $new_sessid,
+							'last_activity' => $this->now)
+						)
+						->update($this->_config['sess_collection_name']);
+				}
+				// Update session record
+				elseif ($this->sess_table_name != '')
+				{
+					$this->CI->db->query(
+						$this->CI->db->update_string(
+							$this->sess_table_name,
+							array(
+								'last_activity' => $this->now,
+								'session_id' => $new_sessid
+							),
+							array('session_id' => $old_sessid)
+						)
+					);
+				}
 			}
-			// Update session record
-			elseif ($this->sess_table_name != '')
-			{
-				$this->CI->db->query(
-					$this->CI->db->update_string(
-						$this->sess_table_name,
-						array(
-							'last_activity' => $this->now,
-							'session_id' => $new_sessid
-						),
-						array('session_id' => $old_sessid)
-					)
-				);
-			}
+
+		// If it's ajax call, only update last_activity to keep session active
+		// see: https://github.com/EllisLab/CodeIgniter/pull/942
+		} else {
+
+			// Only update last_activity
+			$this->userdata['last_activity'] = $this->now;
+
+			// _set_cookie() will handle this for us if we aren't using database sessions
+			// by pushing all userdata to the cookie.
+			$cookie_data = NULL;
+
+            // Update db if in used
+            if($this->sess_use_database === TRUE)
+            {
+				// set cookie explicitly to only have our session data
+				$cookie_data = array();
+				foreach (array('session_id','ip_address','user_agent','last_activity') as $val)
+				{
+					$cookie_data[$val] = $this->userdata[$val];
+				}
+
+				// Update session document
+				if ($this->_use_mongodb)
+				{
+					// Note that here in ajax mode we never change the session_id
+					$this->CI->mongo_db
+						->where('session_id' => $this->userdata['session_id'])
+						->set(array('last_activity' => $this->now))
+						->update($this->_config['sess_collection_name']);
+				}
+				// Update session record
+				elseif ($this->sess_table_name != '')
+				{
+                	// Note that here in ajax mode we never change the session_id
+					$this->CI->db->query(
+						$this->CI->db->update_string(
+							$this->sess_table_name,
+							array('last_activity' => $this->now),
+							array('session_id' => $this->userdata['session_id'])
+						)
+					);
+				}
+            }
+
 		}
 
 		// Write the cookie
 		$this->_set_cookie($cookie_data);
+
 	}
 
 	// --------------------------------------------------------------------
